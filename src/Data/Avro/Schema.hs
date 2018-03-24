@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE NamedFieldPuns        #-}
 {-# LANGUAGE RecordWildCards       #-}
 {-# LANGUAGE TupleSections         #-}
 {-# LANGUAGE TypeSynonymInstances  #-}
@@ -22,6 +23,8 @@ module Data.Avro.Schema
   , typeName
   , buildTypeEnvironment
   , Result(..)
+  , parseAvroJSON
+  , matches
   ) where
 
 import           Prelude as P
@@ -33,7 +36,9 @@ import qualified Data.Aeson as A
 import           Data.Aeson ((.=),object,(.:?),(.:),(.!=),FromJSON(..),ToJSON(..))
 import           Data.Aeson.Types (Parser,typeMismatch)
 import qualified Data.ByteString.Base16 as Base16
+import           Data.Function (on)
 import qualified Data.HashMap.Strict as HashMap
+import           Data.HashMap.Strict ((!))
 import           Data.Hashable
 import qualified Data.List as L
 import           Data.List.NonEmpty (NonEmpty(..))
@@ -49,7 +54,7 @@ import qualified Data.Vector as V
 import qualified Data.Avro.Types as Ty
 import qualified Data.IntMap as IM
 import Data.Int
-import Text.Show.Functions
+import Text.Show.Functions ()
 
 -- |An Avro schema is either
 -- * A "JSON object in the form `{"type":"typeName" ...`
@@ -115,6 +120,7 @@ instance Eq Type where
   Enum _ _ _ _ s _ == Enum _ _ _ _ s2 _ = s == s2
   Union a _ == Union b _ = a == b
   Fixed _ _ _ s == Fixed _ _ _ s2 = s == s2
+
   _ == _ = False
 
 -- | @mkEnum name aliases namespace docs syms@ Constructs an `Enum` schema using
@@ -281,7 +287,7 @@ instance FromJSON Field where
        ty  <- o .: "type"
        let err = fail "Haskell Avro bindings does not support default for aliased or recursive types at this time."
        defM <- o .:? "default"
-       def <- case parseAvroJSON err ty <$> defM of
+       def <- case parseFieldDefault err ty <$> defM of
                 Just (Success x) -> return (Just x)
                 Just (Error e)   -> fail e
                 Nothing          -> return Nothing
@@ -362,7 +368,14 @@ instance Traversable Result where
   traverse _ (Error err) = pure (Error err)
   traverse f (Success v) = Success <$> f v
 
--- |Parse JSON-encoded avro data.
+-- | Field defaults are in the normal Avro JSON format except for
+-- unions. Default values for unions are specified directly as JSON
+-- encodings of the first type in the union.
+parseFieldDefault :: (Text -> Maybe Type) -> Type -> A.Value -> Result (Ty.Value Type)
+parseFieldDefault env (Union (schema :| _) _) value = parseAvroJSON env schema value
+parseFieldDefault env schema value                  = parseAvroJSON env schema value
+
+-- | Parse JSON-encoded avro data.
 parseAvroJSON :: (Text -> Maybe Type) -> Type -> A.Value -> Result (Ty.Value Type)
 parseAvroJSON env (NamedType (TN tn)) av =
   case env tn of
@@ -412,9 +425,25 @@ parseAvroJSON env ty av =
                                   Nothing -> fail $ "Decode failure: No record field '" <> T.unpack (fldName f) <> "' and no default in schema."
                       Just v  -> parseAvroJSON env (fldType f) v
               Ty.Record ty . HashMap.fromList <$> mapM (\f -> (fldName f,) <$> lkAndParse f) fields
-          Union tys _ -> do
-            f <- tryAllTypes env tys av
-            maybe (fail $ "No match for given record in union '" <> show (typeName ty) <> "'.") pure f
+
+          -- unions in JSON are encoded as an object with a single
+          -- key, the type name for the specific branch of the union
+          -- present
+          --
+          -- examples:
+          --  - { "string" : "blarg" }
+          --  - { "Foo" : <recursive encoded record of type "Foo"> }
+          Union tys _
+           | length obj == 0 -> fail "Invalid encoding of union: empty object ({})."
+           | length obj > 1  -> fail "Invalid encoding of union: too many fields."
+           | otherwise       ->
+               let branch = head $ HashMap.keys obj
+                   names = HashMap.fromList [(typeName t, t) | t <- NE.toList tys]
+               in case HashMap.lookup branch names of
+                 Just t  -> do
+                   nested <- parseAvroJSON env t $ obj ! branch
+                   return $ Ty.Union tys t nested
+                 Nothing -> fail $ "Type '" <> T.unpack branch <> "' not in union."
           _ -> avroTypeMismatch ty "object"
       A.Null -> case ty of
                   Null -> return Ty.Null
@@ -423,8 +452,8 @@ parseAvroJSON env ty av =
 
 tryAllTypes :: (Text -> Maybe Type) -> NonEmpty Type -> A.Value -> Result (Maybe (Ty.Value Type))
 tryAllTypes env tys av =
-     getFirst <$> foldMap (\t -> First . Just <$> parseAvroJSON env t av) (NE.toList tys)
-                          `catchError` (\_ -> return mempty)
+     getFirst <$> foldMap go (NE.toList tys) `catchError` (\_ -> return mempty)
+  where go schema = First . Just <$> parseAvroJSON env schema av
 
 avroTypeMismatch :: Type -> Text -> Result a
 avroTypeMismatch expected actual =
@@ -486,6 +515,20 @@ buildTypeEnvironment failure from =
         Fixed {..}  -> mk name aliases namespace
         Array {..}  -> go item
         _           -> []
+
+-- | Checks that two schemas match. This is like equality of schemas,
+-- except 'NamedTypes' match against other types /with the same name/.
+--
+-- This extends recursively: two records match /if their fields
+-- match/.
+matches :: Type -> Type -> Bool
+matches (NamedType (TN n)) t        = n == typeName t
+matches t (NamedType (TN n))        = typeName t == n
+matches (Array itemA) (Array itemB) = matches itemA itemB
+matches a@Record{} b@Record{}       = and $ zipWith fieldMatches (fields a) (fields b)
+  where fieldMatches = matches `on` fldType
+matches a@Union{} b@Union{}         = and $ NE.zipWith matches (options a) (options b)
+matches t1 t2                       = t1 == t2
 
 -- TODO: Currently ensures normalisation: only in one way
 -- that is needed for "extractRecord".

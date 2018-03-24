@@ -2,7 +2,7 @@
 -- see http://haskell.org/cabal/users-guide/
 
 name:                avro
-version:             0.2.0.0
+version:             0.2.1.0
 synopsis:            Avro serialization support for Haskell
 description:         Avro serialization and deserialization support for Haskell
 homepage:            https://github.com/haskell-works/hw-haskell-avro.git
@@ -36,6 +36,7 @@ library
                         Data.Avro.Deconflict,
                         Data.Avro.Encode,
                         Data.Avro.EncodeRaw,
+                        Data.Avro.JSON
                         Data.Avro.Schema,
                         Data.Avro.Types,
                         Data.Avro.Zag,

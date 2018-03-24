@@ -76,13 +76,18 @@ module Data.Avro
   , (.:)
   , (.=), record
   , Result(..), badValue
+
   , decode
   , decodeWithSchema
   , decodeContainer
   , decodeContainerBytes
+
   , encode
   , encodeContainer
   , encodeContainerWithSync
+
+  , S.parseAvroJSON
+
   , schemaOf
   ) where
 

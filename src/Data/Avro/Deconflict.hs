@@ -10,7 +10,6 @@ import qualified Data.HashMap.Strict as HashMap
 import qualified Data.List.NonEmpty as NE
 import           Data.List.NonEmpty (NonEmpty(..))
 import           Data.Text           (Text)
-import qualified Data.Text           as Text
 import qualified Data.Text.Encoding  as Text
 
 -- | @deconflict writer reader val@ will convert a value that was

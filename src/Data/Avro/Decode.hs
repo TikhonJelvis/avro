@@ -27,7 +27,6 @@ import qualified Data.ByteString.Lazy       as BL
 import           Data.ByteString            (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.Int
-import           Data.List                  (foldl')
 import qualified Data.List.NonEmpty as NE
 import           Data.Maybe
 import qualified Data.Map                   as Map
@@ -40,7 +39,6 @@ import qualified Data.Text.Encoding         as Text
 import qualified Data.Vector                as V
 
 import           Data.Avro.DecodeRaw
-import           Data.Avro.Zag
 import           Data.Avro.Schema as S
 import qualified Data.Avro.Types as T
 

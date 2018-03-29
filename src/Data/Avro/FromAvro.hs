@@ -6,13 +6,10 @@ module Data.Avro.FromAvro
 
 where
 
-import           Control.Arrow        (first)
 import           Data.Avro.HasAvroSchema
-import qualified Data.Avro.Encode     as E
 import           Data.Avro.Schema     as S
 import           Data.Avro.Types      as T
 import qualified Data.ByteString      as B
-import           Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import           Data.Foldable        (toList)
 import qualified Data.HashMap.Strict  as HashMap
@@ -21,11 +18,8 @@ import           Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.Map             as Map
 import           Data.Monoid          ((<>))
 import           Data.Text            (Text)
-import qualified Data.Text            as Text
 import qualified Data.Text.Lazy       as TL
 import           Data.Tagged
-import qualified Data.Vector          as V
-import           Data.Word
 
 class HasAvroSchema a => FromAvro a where
   fromAvro :: Value Type -> Result a

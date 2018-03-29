@@ -34,7 +34,7 @@ import           Data.List               as DL
 import           Data.List.NonEmpty      (NonEmpty(..))
 import qualified Data.List.NonEmpty      as NE
 import           Data.Monoid
-import           Data.Maybe              (catMaybes, mapMaybe)
+import           Data.Maybe              (mapMaybe)
 import qualified Data.Set                as S
 import           Data.Text               (Text)
 import qualified Data.Text               as T
@@ -51,7 +51,6 @@ import Data.Avro.EncodeRaw
 import Data.Avro.Schema as S
 import Data.Avro.Types  as T
 import Data.Avro.Zag
-import Data.Avro.Zig
 
 encodeAvro :: EncodeAvro a => a -> BL.ByteString
 encodeAvro = toLazyByteString . putAvro
@@ -234,4 +233,4 @@ instance EncodeAvro (T.Value Type) where
           Just idx -> AvroM (putI idx <> putAvro val, S.mkUnion opts)
           Nothing  -> error "Union encoding specifies type not found in schema"
       T.Fixed bs  -> avro bs
-      T.Enum sch@S.Enum{..} ix t -> AvroM (putI ix, sch)
+      T.Enum sch@S.Enum{..} ix _ -> AvroM (putI ix, sch)

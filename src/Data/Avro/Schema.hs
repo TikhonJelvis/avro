@@ -1,10 +1,10 @@
-{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE RecordWildCards       #-}
 {-# LANGUAGE TupleSections         #-}
 {-# LANGUAGE TypeSynonymInstances  #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 -- | Avro 'Schema's, represented here as values of type 'Schema',
 -- describe the serialization and de-serialization of values.
 --
@@ -27,34 +27,34 @@ module Data.Avro.Schema
   , matches
   ) where
 
-import           Prelude as P
 import           Control.Applicative
 import           Control.Monad.Except
+import qualified Control.Monad.Fail         as MF
 import           Control.Monad.State.Strict
-import qualified Control.Monad.Fail as MF
-import qualified Data.Aeson as A
-import           Data.Aeson ((.=),object,(.:?),(.:),(.!=),FromJSON(..),ToJSON(..))
-import           Data.Aeson.Types (Parser,typeMismatch)
-import qualified Data.ByteString.Base16 as Base16
-import           Data.Function (on)
-import qualified Data.HashMap.Strict as HashMap
-import           Data.HashMap.Strict ((!))
+import           Data.Aeson                 (FromJSON (..), ToJSON (..), object,
+                                             (.!=), (.:), (.:?), (.=))
+import qualified Data.Aeson                 as A
+import           Data.Aeson.Types           (Parser, typeMismatch)
+import qualified Data.Avro.Types            as Ty
+import qualified Data.ByteString.Base16     as Base16
+import           Data.Function              (on)
 import           Data.Hashable
-import qualified Data.List as L
-import           Data.List.NonEmpty (NonEmpty(..))
-import qualified Data.List.NonEmpty as NE
-import           Data.Maybe (catMaybes, fromMaybe)
-import           Data.Monoid ((<>), First(..))
-import qualified Data.Set as S
+import qualified Data.HashMap.Strict        as HashMap
+import           Data.Int
+import qualified Data.IntMap                as IM
+import qualified Data.List                  as L
+import           Data.List.NonEmpty         (NonEmpty (..))
+import qualified Data.List.NonEmpty         as NE
+import           Data.Maybe                 (catMaybes, fromMaybe)
+import           Data.Monoid                ((<>))
+import qualified Data.Set                   as S
 import           Data.String
-import           Data.Text (Text)
-import qualified Data.Text as T
-import           Data.Text.Encoding as T
-import qualified Data.Vector as V
-import qualified Data.Avro.Types as Ty
-import qualified Data.IntMap as IM
-import Data.Int
-import Text.Show.Functions ()
+import           Data.Text                  (Text)
+import qualified Data.Text                  as T
+import           Data.Text.Encoding         as T
+import qualified Data.Vector                as V
+import           Prelude                    as P
+import           Text.Show.Functions        ()
 
 -- |An Avro schema is either
 -- * A "JSON object in the form `{"type":"typeName" ...`
@@ -87,20 +87,20 @@ data Type
                , order     :: Maybe Order
                , fields    :: [Field]
                }
-      | Enum { name      :: TypeName
-             , namespace :: Maybe Text
-             , aliases   :: [TypeName]
-             , doc       :: Maybe Text
-             , symbols   :: [Text]
+      | Enum { name         :: TypeName
+             , namespace    :: Maybe Text
+             , aliases      :: [TypeName]
+             , doc          :: Maybe Text
+             , symbols      :: [Text]
              , symbolLookup :: Int64 -> Maybe Text
              }
-      | Union { options  :: NonEmpty Type
+      | Union { options     :: NonEmpty Type
               , unionLookup :: Int64 -> Maybe Type
               }
-      | Fixed { name        :: TypeName
-              , namespace   :: Maybe Text
-              , aliases     :: [TypeName]
-              , size        :: Integer
+      | Fixed { name      :: TypeName
+              , namespace :: Maybe Text
+              , aliases   :: [TypeName]
+              , size      :: Integer
               }
     deriving (Show)
 
@@ -173,12 +173,12 @@ typeName bt =
     Union (x:|_) _   -> typeName x
     _                -> unTN $ name bt
 
-data Field = Field { fldName       :: Text
-                   , fldAliases    :: [Text]
-                   , fldDoc        :: Maybe Text
-                   , fldOrder      :: Maybe Order
-                   , fldType       :: Type
-                   , fldDefault    :: Maybe (Ty.Value Type)
+data Field = Field { fldName    :: Text
+                   , fldAliases :: [Text]
+                   , fldDoc     :: Maybe Text
+                   , fldOrder   :: Maybe Order
+                   , fldType    :: Type
+                   , fldDefault :: Maybe (Ty.Value Type)
                    }
   deriving (Eq, Show)
 
@@ -188,15 +188,15 @@ data Order = Ascending | Descending | Ignore
 instance FromJSON Type where
   parseJSON (A.String s) =
     case s of
-      "null"     -> return Null
-      "boolean"  -> return Boolean
-      "int"      -> return Int
-      "long"     -> return Long
-      "float"    -> return Float
-      "double"   -> return Double
-      "bytes"    -> return Bytes
-      "string"   -> return String
-      somename   -> return (NamedType (TN somename))
+      "null"    -> return Null
+      "boolean" -> return Boolean
+      "int"     -> return Int
+      "long"    -> return Long
+      "float"   -> return Float
+      "double"  -> return Double
+      "bytes"   -> return Bytes
+      "string"  -> return String
+      somename  -> return (NamedType (TN somename))
   parseJSON (A.Object o) =
     do ty <- o .: ("type" :: Text)
        case ty of
@@ -278,7 +278,7 @@ instance ToJSON TypeName where
 
 instance FromJSON TypeName where
   parseJSON (A.String s) = return (TN s)
-  parseJSON j = typeMismatch "TypeName" j
+  parseJSON j            = typeMismatch "TypeName" j
 
 instance FromJSON Field where
   parseJSON (A.Object o) =
@@ -355,7 +355,7 @@ instance Alternative Result where
 instance MonadPlus Result where
   mzero = fail "mzero"
   mplus a@(Success _) _ = a
-  mplus _ b = b
+  mplus _ b             = b
 instance Monoid (Result a) where
   mempty = fail "Empty Result"
   mappend = mplus
@@ -369,19 +369,33 @@ instance Traversable Result where
   traverse f (Success v) = Success <$> f v
 
 -- | Field defaults are in the normal Avro JSON format except for
--- unions. Default values for unions are specified directly as JSON
--- encodings of the first type in the union.
+-- unions. Default values for unions are specified as JSON encodings
+-- of the first type in the union.
 parseFieldDefault :: (Text -> Maybe Type) -> Type -> A.Value -> Result (Ty.Value Type)
-parseFieldDefault env (Union (schema :| _) _) value = parseAvroJSON env schema value
-parseFieldDefault env schema value                  = parseAvroJSON env schema value
+parseFieldDefault env schema value = parseAvroJSON defaultUnion env schema value
+  where defaultUnion (Union (t :| _) _) val = parseFieldDefault env t val
+        defaultUnion _ _                    = error "Impossible: not Union."
 
 -- | Parse JSON-encoded avro data.
-parseAvroJSON :: (Text -> Maybe Type) -> Type -> A.Value -> Result (Ty.Value Type)
-parseAvroJSON env (NamedType (TN tn)) av =
+parseAvroJSON :: (Type -> A.Value -> Result (Ty.Value Type))
+                 -- ^ How to handle unions. The way unions are
+                 -- formatted in JSON depends on whether we're parsing
+                 -- a normal Avro object or we're parsing a default
+                 -- declaration in a schema.
+                 --
+                 -- This function will only ever be passed 'Union'
+                 -- schemas. It /should/ error out if this is not the
+                 -- case—it represents a bug in this code.
+              -> (Text -> Maybe Type)
+              -> Type
+              -> A.Value
+              -> Result (Ty.Value Type)
+parseAvroJSON union env (NamedType (TN tn)) av =
   case env tn of
     Nothing -> fail $ "Could not resolve type name for " <> show tn
-    Just t  -> parseAvroJSON env t av
-parseAvroJSON env ty av =
+    Just t  -> parseAvroJSON union env t av
+parseAvroJSON union _ u@Union{} av             = union u av
+parseAvroJSON union env ty av                  =
     case av of
       A.String s     ->
         case ty of
@@ -390,9 +404,6 @@ parseAvroJSON env ty av =
               if s `elem` symbols
                 then return $ Ty.Enum ty (maybe (error "IMPOSSIBLE BUG") id $ lookup s (zip symbols [0..])) s
                 else fail $ "JSON string is not one of the expected symbols for enum '" <> show name <> "': " <> T.unpack s
-          Union tys _ -> do
-            f <- tryAllTypes env tys av
-            maybe (fail $ "No match for String in union '" <> show (typeName ty) <> "'.") pure f
           _ -> avroTypeMismatch ty "string"
       A.Bool b       -> case ty of
                           Boolean -> return $ Ty.Boolean b
@@ -403,57 +414,26 @@ parseAvroJSON env ty av =
           Long   -> return $ Ty.Long   (floor i)
           Float  -> return $ Ty.Float  (realToFrac i)
           Double -> return $ Ty.Double (realToFrac i)
-          Union tys _ -> do
-            f <- tryAllTypes env tys av
-            maybe (fail $ "No match for Number in union '" <> show (typeName ty) <> "'.") pure f
-          _                   -> avroTypeMismatch ty "number"
+          _      -> avroTypeMismatch ty "number"
       A.Array vec    ->
         case ty of
-          Array t -> Ty.Array <$> V.mapM (parseAvroJSON env t) vec
-          Union tys _ -> do
-            f <- tryAllTypes env tys av
-            maybe (fail $ "No match for Array in union '" <> show (typeName ty) <> "'.") pure f
-          _  -> avroTypeMismatch ty "array"
+          Array t -> Ty.Array <$> V.mapM (parseAvroJSON union env t) vec
+          _       -> avroTypeMismatch ty "array"
       A.Object obj ->
         case ty of
-          Map mTy     -> Ty.Map <$> mapM (parseAvroJSON env mTy) obj
+          Map mTy     -> Ty.Map <$> mapM (parseAvroJSON union env mTy) obj
           Record {..} ->
            do let lkAndParse f =
                     case HashMap.lookup (fldName f) obj of
                       Nothing -> case fldDefault f of
                                   Just v  -> return v
                                   Nothing -> fail $ "Decode failure: No record field '" <> T.unpack (fldName f) <> "' and no default in schema."
-                      Just v  -> parseAvroJSON env (fldType f) v
+                      Just v  -> parseAvroJSON union env (fldType f) v
               Ty.Record ty . HashMap.fromList <$> mapM (\f -> (fldName f,) <$> lkAndParse f) fields
-
-          -- unions in JSON are encoded as an object with a single
-          -- key, the type name for the specific branch of the union
-          -- present
-          --
-          -- examples:
-          --  - { "string" : "blarg" }
-          --  - { "Foo" : <recursive encoded record of type "Foo"> }
-          Union tys _
-           | length obj == 0 -> fail "Invalid encoding of union: empty object ({})."
-           | length obj > 1  -> fail "Invalid encoding of union: too many fields."
-           | otherwise       ->
-               let branch = head $ HashMap.keys obj
-                   names = HashMap.fromList [(typeName t, t) | t <- NE.toList tys]
-               in case HashMap.lookup branch names of
-                 Just t  -> do
-                   nested <- parseAvroJSON env t $ obj ! branch
-                   return $ Ty.Union tys t nested
-                 Nothing -> fail $ "Type '" <> T.unpack branch <> "' not in union."
           _ -> avroTypeMismatch ty "object"
       A.Null -> case ty of
                   Null -> return Ty.Null
-                  Union us _ | Null `elem` NE.toList us -> return $ Ty.Union us Null Ty.Null
-                  _ -> avroTypeMismatch ty "null"
-
-tryAllTypes :: (Text -> Maybe Type) -> NonEmpty Type -> A.Value -> Result (Maybe (Ty.Value Type))
-tryAllTypes env tys av =
-     getFirst <$> foldMap go (NE.toList tys) `catchError` (\_ -> return mempty)
-  where go schema = First . Just <$> parseAvroJSON env schema av
+                  _    -> avroTypeMismatch ty "null"
 
 avroTypeMismatch :: Type -> Text -> Result a
 avroTypeMismatch expected actual =
@@ -536,10 +516,10 @@ matches t1 t2                       = t1 == t2
 -- all the named types are resolvable within the scope of the schema.
 -- The other way around (to each record is inlined only once and is referenced
 -- as a named type after that) is not implemented.
-normSchema :: [Schema] -- ^ List of all possible records
-           -> Schema   -- ^ Schema to normalise
-           -> State (S.Set TypeName) Schema
-normSchema rs r = case r of
+_normSchema :: [Schema] -- ^ List of all possible records
+            -> Schema   -- ^ Schema to normalise
+            -> State (S.Set TypeName) Schema
+_normSchema rs r = case r of
   t@(NamedType tn) -> do
     let sn = shortName tn
     resolved <- get
@@ -549,12 +529,12 @@ normSchema rs r = case r of
         modify' (S.insert sn)
         pure $ fromMaybe (error $ "Unable to resolve schema: " <> show (typeName t)) (findSchema tn)
 
-  Array s   -> Array <$> normSchema rs s
-  Map s     -> Map <$> normSchema rs s
+  Array s   -> Array <$> _normSchema rs s
+  Map s     -> Map <$> _normSchema rs s
   Record{name = tn}  -> do
     let sn = shortName tn
     modify' (S.insert sn)
-    flds <- mapM (\fld -> setType fld <$> normSchema rs (fldType fld)) (fields r)
+    flds <- mapM (\fld -> setType fld <$> _normSchema rs (fldType fld)) (fields r)
     pure $ r { fields = flds }
   s         -> pure s
   where
